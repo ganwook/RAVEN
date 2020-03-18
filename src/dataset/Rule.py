@@ -2,18 +2,20 @@
 
 
 import copy
-
+import itertools
 import numpy as np
 
 from const import COLOR_MAX, COLOR_MIN
 
 
-def Rule_Wrapper(name, attr, param, component_idx):
+def Rule_Wrapper(name, attr, param, component_idx, entity_idxs = None):
     ret = None
     if name == "Constant":
         ret = Constant(name, attr, param, component_idx)
     elif name == "Progression":
         ret = Progression(name, attr, param, component_idx)
+    elif name == "Progression_new":
+        ret = Progression_new(name, attr, param, component_idx, entity_idxs)
     elif name == "Arithmetic":
         ret = Arithmetic(name, attr, param, component_idx)
     elif name == "Distribute_Three":
@@ -22,13 +24,21 @@ def Rule_Wrapper(name, attr, param, component_idx):
         raise ValueError("Unsupported Rule")
     return ret 
 
+def Rule_Target(Rule, Root, component = False, entity = False, condition = 'random'):
+    
+    Components = Root.children[0].children
+    component_idx = 0
+    
+    Entities = Components[component_idx].children[0].children
+    
+
 
 class Rule(object):
     """General API for a rule.
     Priority order: Rule on Number/Position always comes first
     """
     
-    def __init__(self, name, attr, params, component_idx=0):
+    def __init__(self, name, attr, params, component_idx=0, entity_idxs=None):
         """Instantiate a rule by its name, attribute, paramter list and the component it applies to.
         Each rule should be applied to all entities in a component.
         Arguments:
@@ -42,6 +52,7 @@ class Rule(object):
         self.params = params
         self.component_idx = component_idx
         self.value = 0
+        self.entity_idxs = entity_idxs
         self.sample()
     
     def sample(self):
@@ -59,9 +70,8 @@ class Rule(object):
             second_aot(AoTNode): a modified AoT
         """
         # Root -> Structure -> Component -> Layout -> Entity
-        pass
-
-
+        pass    
+    
 class Constant(Rule):
     """Unary operator. Nothing changes.
     """
@@ -74,9 +84,47 @@ class Constant(Rule):
             in_aot = aot
         return copy.deepcopy(in_aot)
 
+class Progression_new(Rule):
+    """Unary operator. Attribute difference on two consequetive Panels remains the same.
+    Only for entity level attributes
+    """
+
+    def __init__(self, name, attr, param, component_idx, entity_idxs):
+        super(Progression_new, self).__init__(name, attr, param, component_idx, entity_idxs)
+        # Flag to trigger consistency of the attribute in the first column
+    
+    def apply_rule(self, aot, in_aot=None, entity_idxs = None):
+        current_layout = aot.children[0].children[self.component_idx].children[0]
+        if in_aot is None:
+            in_aot = aot
+        second_aot = copy.deepcopy(in_aot)
+        second_layout = second_aot.children[0].children[self.component_idx].children[0]
+        if self.attr == "Type":
+            old_value_level = current_layout.children[0].type.get_value_level()        
+            for idx in self.entity_idxs:
+                entity = second_layout.children[idx]
+                entity.type.set_value_level(old_value_level + self.value)
+        elif self.attr == "Size":
+            old_value_level = current_layout.children[0].size.get_value_level()
+            for idx in self.entity_idxs:
+                entity = second_layout.children[idx]
+                entity.size.set_value_level(old_value_level + self.value)
+        elif self.attr == "Color":
+            old_value_level = current_layout.children[0].color.get_value_level()
+            for idx in self.entity_idxs:
+                entity = second_layout.children[idx]
+                entity.color.set_value_level(old_value_level + self.value)
+        else:
+            raise ValueError("Unsupported attriubute")
+        
+        return second_aot
+
+    
+
 
 class Progression(Rule):
     """Unary operator. Attribute difference on two consequetive Panels remains the same.
+    Only for entity level attributes
     """
 
     def __init__(self, name, attr, param, component_idx):
@@ -90,26 +138,9 @@ class Progression(Rule):
             in_aot = aot
         second_aot = copy.deepcopy(in_aot)
         second_layout = second_aot.children[0].children[self.component_idx].children[0]
-        if self.attr == "Number":
-            second_layout.number.set_value_level(second_layout.number.get_value_level() + self.value)
-            second_layout.position.sample(second_layout.number.get_value())
-            pos = second_layout.position.get_value()
-            del second_layout.children[:]
-            for i in range(len(pos)):
-                entity = copy.deepcopy(current_layout.children[0])
-                entity.name = str(i)
-                entity.bbox = pos[i]
-                if not current_layout.uniformity.get_value():
-                    entity.resample()
-                second_layout.insert(entity)
-        elif self.attr == "Position":
-            second_pos_idx = (second_layout.position.get_value_idx() + self.value) % len(second_layout.position.values)
-            second_layout.position.set_value_idx(second_pos_idx)
-            second_bbox = second_layout.position.get_value()
-            for i in range(len(second_bbox)):
-                second_layout.children[i].bbox = second_bbox[i]
-        elif self.attr == "Type":
-            old_value_level = current_layout.children[0].type.get_value_level()
+
+        if self.attr == "Type":
+            ofld_value_level = current_layout.children[0].type.get_value_level()
             # enforce value consistency
             if self.first_col and not current_layout.uniformity.get_value():
                 for entity in current_layout.children:
@@ -137,6 +168,26 @@ class Progression(Rule):
         self.first_col = not self.first_col
         return second_aot
 
+        """
+                if self.attr == "Number":
+            second_layout.number.set_value_level(second_layout.number.get_value_level() + self.value)
+            second_layout.position.sample(second_layout.number.get_value())
+            pos = second_layout.position.get_value()
+            del second_layout.children[:]
+            for i in range(len(pos)):
+                entity = copy.deepcopy(current_layout.children[0])
+                entity.name = str(i)
+                entity.bbox = pos[i]
+                if not current_layout.uniformity.get_value():
+                    entity.resample()
+                second_layout.insert(entity)
+        elif self.attr == "Position":
+            second_pos_idx = (second_layout.position.get_value_idx() + self.value) % len(second_layout.position.values)
+            second_layout.position.set_value_idx(second_pos_idx)
+            second_bbox = second_layout.position.get_value()
+            for i in range(len(second_bbox)):
+                second_layout.children[i].bbox = second_bbox[i]
+        """
 
 class Arithmetic(Rule):
     """Binary operator. Basically: Panel_3 = Panel_1 + Panel_2.
