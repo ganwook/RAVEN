@@ -108,3 +108,7 @@ venv.bak/
 
 # experiments
 /experiments
+
+
+# Generated data
+/src/dataset/Datasets
