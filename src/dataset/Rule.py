@@ -5,17 +5,17 @@ import copy
 import itertools
 import numpy as np
 
-from const import COLOR_MAX, COLOR_MIN
+from const import *
 
 
-def Rule_Wrapper(name, attr, param, component_idx, entity_idxs = None):
+def Rule_Wrapper(name, attr, param, component_idx, entity_idxs=None, tgt_attr=None):
     ret = None
     if name == "Constant":
         ret = Constant(name, attr, param, component_idx)
     elif name == "Progression":
         ret = Progression(name, attr, param, component_idx)
     elif name == "Progression_new":
-        ret = Progression_new(name, attr, param, component_idx, entity_idxs)
+        ret = Progression_new(name, attr, param, component_idx, entity_idxs, tgt_attr)
     elif name == "Arithmetic":
         ret = Arithmetic(name, attr, param, component_idx)
     elif name == "Distribute_Three":
@@ -38,7 +38,7 @@ class Rule(object):
     Priority order: Rule on Number/Position always comes first
     """
     
-    def __init__(self, name, attr, params, component_idx=0, entity_idxs=None):
+    def __init__(self, name, attr, params, component_idx=0, entity_idxs=None, tgt_attr=None):
         """Instantiate a rule by its name, attribute, paramter list and the component it applies to.
         Each rule should be applied to all entities in a component.
         Arguments:
@@ -53,6 +53,8 @@ class Rule(object):
         self.component_idx = component_idx
         self.value = 0
         self.entity_idxs = entity_idxs
+        self.tgt_attr = tgt_attr
+        self.tgt_value = None
         self.sample()
     
     def sample(self):
@@ -60,6 +62,30 @@ class Rule(object):
         """
         if self.params is not None:
             self.value = np.random.choice(self.params)
+        # If the rule has its target
+        if self.tgt_attr is not None:
+            if self.attr != self.tgt_attr:
+                if self.tgt_attr=="Type":
+                    self.tgt_value = np.random.choice(TYPE_VALUES[1:])
+                if self.tgt_attr=="Size":
+                    self.tgt_value = np.random.choice(SIZE_VALUES)
+                if self.tgt_attr=="Color":
+                    self.tgt_value = np.random.choice(COLOR_VALUES)
+            else:
+                # attr and tgt_attr can be same. => conditioned sampling
+                min_or_max = int(self.value > 0)
+                if self.tgt_attr=="Type":
+                    interv = [TYPE_MIN + 1, TYPE_MAX] # exclude "none"
+                    interv[min_or_max] -= self.value
+                    self.tgt_value = np.random.choice(TYPE_VALUES[interv[0]:interv[1]])
+                if self.tgt_attr=="Size":
+                    interv = [SIZE_MIN, SIZE_MAX]
+                    interv[min_or_max] -= self.value
+                    self.tgt_value = np.random.choice(SIZE_VALUES[interv[0]:interv[1]])
+                if self.tgt_attr=="Color":
+                    interv = [COLOR_MIN, COLOR_MAX]
+                    interv[min_or_max] -= self.value
+                    self.tgt_value = np.random.choice(COLOR_VALUES[interv[0]:interv[1]])
     
     def apply_rule(self, aot, in_aot=None):
         """Apply the rule to a component in the AoT.
@@ -89,8 +115,8 @@ class Progression_new(Rule):
     Only for entity level attributes
     """
 
-    def __init__(self, name, attr, param, component_idx, entity_idxs):
-        super(Progression_new, self).__init__(name, attr, param, component_idx, entity_idxs)
+    def __init__(self, name, attr, param, component_idx, entity_idxs, tgt_attr):
+        super(Progression_new, self).__init__(name, attr, param, component_idx, entity_idxs, tgt_attr)
         # Flag to trigger consistency of the attribute in the first column
     
     def apply_rule(self, aot, in_aot=None, entity_idxs = None):
@@ -100,20 +126,25 @@ class Progression_new(Rule):
         second_aot = copy.deepcopy(in_aot)
         second_layout = second_aot.children[0].children[self.component_idx].children[0]
         if self.attr == "Type":
-            old_value_level = current_layout.children[0].type.get_value_level()        
-            for idx in self.entity_idxs:
+            for idx in entity_idxs:
+                old_value_level = current_layout.children[idx].type.get_value_level()
                 entity = second_layout.children[idx]
                 entity.type.set_value_level(old_value_level + self.value)
         elif self.attr == "Size":
-            old_value_level = current_layout.children[0].size.get_value_level()
-            for idx in self.entity_idxs:
+            for idx in entity_idxs:
+                old_value_level = current_layout.children[idx].size.get_value_level()
                 entity = second_layout.children[idx]
                 entity.size.set_value_level(old_value_level + self.value)
         elif self.attr == "Color":
-            old_value_level = current_layout.children[0].color.get_value_level()
-            for idx in self.entity_idxs:
+            for idx in entity_idxs:
+                old_value_level = current_layout.children[idx].color.get_value_level()
                 entity = second_layout.children[idx]
                 entity.color.set_value_level(old_value_level + self.value)
+        elif self.attr == "Angle":
+            for idx in entity_idxs:
+                old_value_level = current_layout.children[idx].angle.get_value_level()
+                entity = second_layout.children[idx]
+                entity.angle.set_value_level(old_value_level + self.value)
         else:
             raise ValueError("Unsupported attriubute")
         

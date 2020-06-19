@@ -4,23 +4,39 @@
 import numpy as np
 from scipy.special import comb
 
-from const import MAX_COMPONENTS, RULE_ATTR
+from const import MAX_COMPONENTS, RULE_ATTR, TGT_ATTR
 from Rule import Rule_Wrapper
 
 
-def sample_rules():
+def sample_rules(with_tgt=True, debug=False):
     """First sample # components; for each component, sample a rule on each attribute.
     """
-    num_components = np.random.randint(1, MAX_COMPONENTS + 1)
+    num_components = 1
     all_rules = []
+    idx = np.random.choice(len(RULE_ATTR))
+    name_attr_param = RULE_ATTR[idx]
+    if with_tgt:
+        tgt_attr = np.random.choice(TGT_ATTR)
+        rule = Rule_Wrapper(name_attr_param[0], name_attr_param[1], name_attr_param[2], component_idx=0, tgt_attr=tgt_attr)    
+        if debug:
+            print("the rule is sampled \n", rule.name, rule.attr, rule.value, '\n its target : ', rule.tgt_attr, rule.tgt_value)
+    else:
+        rule = Rule_Wrapper(name_attr_param[0], name_attr_param[1], name_attr_param[2], component_idx=0)
+        if debug:
+            print("Following rule is sampled \n", rule.name, rule.attr, rule.value)
+    all_rules.append(rule)
+    
+    return all_rules
+    
+    """
+    original RAVEN
     for i in range(num_components):
         all_rules_component = []
         for j in range(len(RULE_ATTR)):
             idx = np.random.choice(len(RULE_ATTR[j]))
             name_attr_param = RULE_ATTR[j][idx]
             all_rules_component.append(Rule_Wrapper(name_attr_param[0], name_attr_param[1], name_attr_param[2], component_idx=i))
-        all_rules.append(all_rules_component)
-    return all_rules
+    """
 
 # pay attention to Position Arithmetic, new entities (resample)
 def sample_attr_avail(rule_groups, row_3_3):

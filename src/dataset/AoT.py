@@ -8,7 +8,7 @@ from scipy.special import comb
 
 from Attribute import Angle, Color, Number, Position, Size, Type, Uniformity
 from constraints import rule_constraint
-
+from const import ENT_ATTR
 
 class AoTNode(object):
     """Superclass of AoT. 
@@ -71,7 +71,7 @@ class Root(AoTNode):
     def __init__(self, name, is_pg=False):
         super(Root, self).__init__(name, level="Root", node_type="or", is_pg=is_pg)
     
-    def sample(self):
+    def sample(self, rule=None):
         """The function returns a separate AoT that is correctly parsed.
         Note that a new node is needed so that modification does not alter settings
         in the original tree.
@@ -82,7 +82,7 @@ class Root(AoTNode):
             raise ValueError("Could not sample on a PG")
         new_node = Root(self.name, True)
         selected = np.random.choice(self.children)
-        new_node.insert(selected._sample())
+        new_node.insert(selected._sample(rule))
         return new_node
 
     def resample(self, change_number=False):
@@ -143,12 +143,12 @@ class Structure(AoTNode):
     def __init__(self, name, is_pg=False):
         super(Structure, self).__init__(name, level="Structure", node_type="and", is_pg=is_pg)
     
-    def _sample(self):
+    def _sample(self, rule=None):
         if self.is_pg:
             raise ValueError("Could not sample on a PG")
         new_node = Structure(self.name, True)
         for child in self.children:
-            new_node.insert(child._sample())
+            new_node.insert(child._sample(rule))
         return new_node
     
     def _prune(self, rule_groups):
@@ -157,7 +157,7 @@ class Structure(AoTNode):
             child = self.children[i]
             # if any of the components fails to satisfy the constraint
             # the structure could not be chosen
-            new_child = child._prune(rule_groups[i])
+            new_child = child._prune(rule_groups)
             if new_child is None:
                 return None
             new_node.insert(new_child)
@@ -172,18 +172,18 @@ class Component(AoTNode):
     def __init__(self, name, is_pg=False):
         super(Component, self).__init__(name, level="Component", node_type="or", is_pg=is_pg)
 
-    def _sample(self):
+    def _sample(self, rule=None):
         if self.is_pg:
             raise ValueError("Could not sample on a PG")
         new_node = Component(self.name, True)
         selected = np.random.choice(self.children)
-        new_node.insert(selected._sample())
+        new_node.insert(selected._sample(rule))
         return new_node
 
-    def _prune(self, rule_group):
+    def _prune(self, rule_groups):
         new_node = Component(self.name)
         for child in self.children:
-            new_child = child._update_constraint(rule_group)
+            new_child = child._update_constraint(rule_groups)
             if new_child is not None:
                 new_node.insert(new_child)
         if len(new_node.children) == 0:
@@ -248,7 +248,7 @@ class Layout(AoTNode):
     def resample(self, change_number=False):
         self._resample(change_number)
             
-    def _sample(self):
+    def _sample(self, rule=None):
         """Though Layout is an "and" node, we do not enumerate all possible configurations, but rather
         we treat it as a sampling process such that different configurtions are sampled. After the
         sampling, the lower level Entities are instantiated.
@@ -270,7 +270,7 @@ class Layout(AoTNode):
         else:
             for i in range(len(pos)):
                 bbox = pos[i]
-                node = Entity(name=str(i), bbox=bbox, entity_constraint=self.entity_constraint)
+                node = Entity(name=str(i), bbox=bbox, entity_constraint=self.entity_constraint, rule=rule)
                 new_node._insert(node)
         return new_node
         
@@ -300,7 +300,7 @@ class Layout(AoTNode):
                 node = Entity(name=str(i), bbox=bbox, entity_constraint=self.entity_constraint)
                 self._insert(node)
 
-    def _update_constraint(self, rule_group):
+    def _update_constraint(self, rule_groups):
         """Update the constraint of the layout. If one constraint is not satisfied, return None 
         such that this structure is disgarded.
         Arguments:
@@ -318,7 +318,7 @@ class Layout(AoTNode):
         size_max = self.entity_constraint["Size"][1]
         color_min = self.entity_constraint["Color"][0]
         color_max = self.entity_constraint["Color"][1]
-        new_constraints = rule_constraint(rule_group, num_min, num_max, 
+        new_constraints = rule_constraint(rule_groups, num_min, num_max, 
                                                       uni_min, uni_max,
                                                       type_min, type_max,
                                                       size_min, size_max,
@@ -413,22 +413,45 @@ class Layout(AoTNode):
 
 class Entity(AoTNode):
 
-    def __init__(self, name, bbox, entity_constraint):
+    def __init__(self, name, bbox, entity_constraint, rule=None):
         super(Entity, self).__init__(name, level="Entity", node_type="leaf", is_pg=True)
         # Attributes
         # Sample each attribute such that the value lies in the admissible range
         # Otherwise, random sample
         self.entity_constraint = entity_constraint
         self.bbox = bbox
-        self.type = Type(min_level=entity_constraint["Type"][0], max_level=entity_constraint["Type"][1])
-        self.type.sample()
-        self.size = Size(min_level=entity_constraint["Size"][0], max_level=entity_constraint["Size"][1])
-        self.size.sample()
-        self.color = Color(min_level=entity_constraint["Color"][0], max_level=entity_constraint["Color"][1])
-        self.color.sample()
-        self.angle = Angle(min_level=entity_constraint["Angle"][0], max_level=entity_constraint["Angle"][1])
-        self.angle.sample()
-    
+        self.sample(rule, entity_constraint)
+
+    def sample(self, rule=None, entity_constraint=None):
+        get_attr = self.modify_attr(entity_constraint)
+        if rule == None:
+            self.size = get_attr['Size']
+            self.type = get_attr['Type']
+            self.color = get_attr['Color']
+            self.angle = get_attr['Angle']
+            self.size.sample()
+            self.type.sample()
+            self.color.sample()
+            self.angle.sample()
+        else:
+            # First of all, sample a value for the targeted attribute
+            self.__dict__.update({rule.tgt_attr.lower() : get_attr[rule.tgt_attr]}) 
+            self.__dict__[rule.tgt_attr.lower()].sample()
+
+            # update constraint conditionally
+            ### TODO : When target attribute appear more than twice
+            real_value = self.__dict__[rule.tgt_attr.lower()].get_value()
+            if real_value == rule.tgt_value:
+                min_or_max = int(rule.value > 0)
+                entity_constraint[rule.attr][min_or_max] -= rule.value
+            
+            # Finally, sample all other attributes except the targetd one
+            get_attr_modified = self.modify_attr(entity_constraint)
+            rand_attr = set(ENT_ATTR) - set([rule.tgt_attr])
+            for attr in rand_attr:
+                self.__dict__.update({attr.lower() : get_attr_modified[attr]}) 
+                self.__dict__[attr.lower()].sample()
+                
     def reset_constraint(self, attr, min_level, max_level):
         attr_name = attr.lower()
         self.entity_constraint[attr][:] = [min_level, max_level]
@@ -441,3 +464,12 @@ class Entity(AoTNode):
         self.size.sample()
         self.color.sample()
         self.angle.sample()
+
+    @staticmethod
+    def modify_attr(entity_constraint):
+        get_attr = {'Size' : Size(min_level=entity_constraint["Size"][0], max_level=entity_constraint["Size"][1]),
+                    'Type' : Type(min_level=entity_constraint["Type"][0], max_level=entity_constraint["Type"][1]),
+                    'Color' : Color(min_level=entity_constraint["Color"][0], max_level=entity_constraint["Color"][1]),
+                    'Angle' : Angle(min_level=entity_constraint["Angle"][0], max_level=entity_constraint["Angle"][1])
+                    }
+        return get_attr
