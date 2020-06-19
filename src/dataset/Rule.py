@@ -152,10 +152,8 @@ class Progression_new(Rule):
 
     
 
-
 class Progression(Rule):
     """Unary operator. Attribute difference on two consequetive Panels remains the same.
-    Only for entity level attributes
     """
 
     def __init__(self, name, attr, param, component_idx):
@@ -169,9 +167,26 @@ class Progression(Rule):
             in_aot = aot
         second_aot = copy.deepcopy(in_aot)
         second_layout = second_aot.children[0].children[self.component_idx].children[0]
-
-        if self.attr == "Type":
-            ofld_value_level = current_layout.children[0].type.get_value_level()
+        if self.attr == "Number":
+            second_layout.number.set_value_level(second_layout.number.get_value_level() + self.value)
+            second_layout.position.sample(second_layout.number.get_value())
+            pos = second_layout.position.get_value()
+            del second_layout.children[:]
+            for i in range(len(pos)):
+                entity = copy.deepcopy(current_layout.children[0])
+                entity.name = str(i)
+                entity.bbox = pos[i]
+                if not current_layout.uniformity.get_value():
+                    entity.resample()
+                second_layout.insert(entity)
+        elif self.attr == "Position":
+            second_pos_idx = (second_layout.position.get_value_idx() + self.value) % len(second_layout.position.values)
+            second_layout.position.set_value_idx(second_pos_idx)
+            second_bbox = second_layout.position.get_value()
+            for i in range(len(second_bbox)):
+                second_layout.children[i].bbox = second_bbox[i]
+        elif self.attr == "Type":
+            old_value_level = current_layout.children[0].type.get_value_level()
             # enforce value consistency
             if self.first_col and not current_layout.uniformity.get_value():
                 for entity in current_layout.children:
@@ -199,26 +214,6 @@ class Progression(Rule):
         self.first_col = not self.first_col
         return second_aot
 
-        """
-                if self.attr == "Number":
-            second_layout.number.set_value_level(second_layout.number.get_value_level() + self.value)
-            second_layout.position.sample(second_layout.number.get_value())
-            pos = second_layout.position.get_value()
-            del second_layout.children[:]
-            for i in range(len(pos)):
-                entity = copy.deepcopy(current_layout.children[0])
-                entity.name = str(i)
-                entity.bbox = pos[i]
-                if not current_layout.uniformity.get_value():
-                    entity.resample()
-                second_layout.insert(entity)
-        elif self.attr == "Position":
-            second_pos_idx = (second_layout.position.get_value_idx() + self.value) % len(second_layout.position.values)
-            second_layout.position.set_value_idx(second_pos_idx)
-            second_bbox = second_layout.position.get_value()
-            for i in range(len(second_bbox)):
-                second_layout.children[i].bbox = second_bbox[i]
-        """
 
 class Arithmetic(Rule):
     """Binary operator. Basically: Panel_3 = Panel_1 + Panel_2.
